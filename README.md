@@ -3,7 +3,7 @@
 | :--------: | :------------: |
 | 5025221000 | Student 1 Name |
 | 5025221000 | Student 2 Name |
-| 5025221000 | Student 3 Name |
+| 5025241171 | Muhammad Sholihuddin Rizky |
 
 # Praktikum Modul 4 _(Module 4 Lab Work)_
 
