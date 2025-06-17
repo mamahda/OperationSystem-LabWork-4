@@ -35,7 +35,12 @@ int main() {
 
 void printString(char* str) {
     while (*str != 0) {
-        interrupt(0x0010, 0x000E << 8 | *str, 0x0000, 0x0000, 0x0000);
+        if (*str == '\n') {
+            interrupt(0x10, 0x0E << 8 | '\r', 0, 0, 0);
+            interrupt(0x10, 0x0E << 8 | '\n', 0, 0, 0);
+        } else {
+            interrupt(0x10, 0x0E << 8 | *str, 0, 0, 0);
+        }
         str++;
     }
 }
@@ -45,8 +50,8 @@ void readString(char* buf) {
     int ch;
 
     while (1) {
-        ch = interrupt(0x0016, 0x0000, 0x0000, 0x0000, 0x0000) & 0x00FF;
-        if (ch == 0x000D) {
+        ch = interrupt(0x16, 0x0000, 0x0000, 0x0000, 0x0000) & 0x00FF;
+        if (ch == 0x0D) {
             printString("\n");
             break;
         }
@@ -54,19 +59,22 @@ void readString(char* buf) {
         if (ch == 0x0008) {
             if (index > 0) {
                 index--;
-                printString("\b \b");
+                interrupt(0x10, 0x0E << 8 | 0x08, 0, 0, 0);
+                interrupt(0x10, 0x0E << 8 | ' ', 0, 0, 0);
+                interrupt(0x10, 0x0E << 8 | 0x08, 0, 0, 0);
             }
         } else {
             buf[index++] = ch;
-            interrupt(0x0010, 0x000E << 8 | ch, 0x0000, 0x0000, 0x0000);
+            interrupt(0x10, 0x000E << 8 | ch, 0x0000, 0x0000, 0x0000);
         }
     }
+    // buf[index++] = '\n';
     buf[index] = 0;
 }
 
 void clearScreen() {
-    interrupt(0x0010, 0x0006, 0x0000, 0x0007, 0x184F);
-    interrupt(0x0010, 0x0002, 0x0000, 0x0000, 0x0000);
+    interrupt(0x10, 0x0006, 0x0000, 0x184F, 0x0007);
+    interrupt(0x10, 0x0002, 0x0000, 0x0000, 0x0000);
 }
 
 char *grep(char *buf, char *arg) {
@@ -213,7 +221,7 @@ void toString(int integer, char *out) {
 
     while (integer > 0) {
         buf[i++] = '0' + mod(integer, 10);
-        integer = integer / 10;
+        integer = div(integer, 10);
     }
 
     while (i > 0) {
