@@ -18,8 +18,6 @@
 
 static const char *source_dir = NULL;
 static char *remove_extension(const char *name);
-int is_within_access_time(); 
-int is_secret_file(const char *filename);
 
 // ------------------------ E -----------------------------------------------
 typedef struct {
