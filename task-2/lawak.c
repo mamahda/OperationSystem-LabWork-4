@@ -65,9 +65,7 @@ void parsing_config(const char *config_path) {
 
 // ------------------------ D -----------------------------------------------
 void log_action(const char *action, const char *path) {
-  if (strcmp(action, "ACCESS") == 0 || 
-    strcmp(action, "GETATTR") == 0 || 
-    strcmp(action, "READDIR") == 0) return;
+  //if (strcmp(action, "ACCESS") == 0 || strcmp(action, "GETATTR") == 0 || strcmp(action, "READDIR") == 0) return;
 
   FILE *log_file = fopen(LOG_PATH, "a");
   if (!log_file) return;
