@@ -3,7 +3,6 @@
 #include <fuse.h>
 #include <stdio.h>
 #include <string.h>
-#include <strings.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
@@ -12,8 +11,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <ctype.h>
-#include <stddef.h>
-
+#include <stdint.h>
 
 #define MAX_FILTER_WORDS 100
 #define LOG_PATH "/home/blackcurrent/Kuliah_Semester_2/SisOp_Praktikum_4/task-2/lawakfs.log"
@@ -23,9 +21,7 @@ static char *remove_extension(const char *name);
 int is_within_access_time(); 
 int is_secret_file(const char *filename);
 
-//
 // ------------------------ E -----------------------------------------------
-
 typedef struct {
   char *filter_words[MAX_FILTER_WORDS];
   int filter_count;
@@ -55,64 +51,43 @@ void parsing_config(const char *config_path) {
         config.filter_words[config.filter_count++] = strdup(token);
         token = strtok(NULL, ",");
       }
-
     } else if (strncmp(line, "SECRET_FILE_BASENAME=", 21) == 0) {
-      strncpy(config.secret_file_basename, line + 21, sizeof(config.secret_file_basename) - 1);
-      config.secret_file_basename[sizeof(config.secret_file_basename) - 1] = '\0';
-
+      strcpy(config.secret_file_basename, line + 21);
     } else if (strncmp(line, "ACCESS_START=", 13) == 0) {
       sscanf(line + 13, "%d:%d", &config.access_start_hour, &config.access_start_min);
-
     } else if (strncmp(line, "ACCESS_END=", 11) == 0) {
       sscanf(line + 11, "%d:%d", &config.access_end_hour, &config.access_end_min);
     }
   }
-
   fclose(fp);
 }
-
 // ------------------------ E -----------------------------------------------
-//
-// ==========================================================================
-//
-// ------------------------ D -----------------------------------------------
 
+// ------------------------ D -----------------------------------------------
 void log_action(const char *action, const char *path) {
-  if (strcmp(action, "ACCESS") == 0 || strcmp(action, "GETATTR") == 0 || strcmp(action, "READDIR") == 0) {
-    return;
-  }
+  if (strcmp(action, "ACCESS") == 0 || 
+    strcmp(action, "GETATTR") == 0 || 
+    strcmp(action, "READDIR") == 0) return;
 
   FILE *log_file = fopen(LOG_PATH, "a");
-  if (!log_file) {
-    char fallback_path[] = "./lawakfs.log";
-    log_file = fopen(fallback_path, "a");
-    if (!log_file) return;
-  }
+  if (!log_file) return;
 
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
   char time_str[20];
   strftime(time_str, sizeof(time_str), "%F %T", t);
 
-  uid_t uid = getuid();
-  fprintf(log_file, "[%s] [%d] [%s] [%s]\n", time_str, uid, action, path);
-  fflush(log_file);
+  fprintf(log_file, "[%s] [%d] [%s] %s\n", time_str, getuid(), action, path);
   fclose(log_file);
 }
-
 // ------------------------ D -----------------------------------------------
-//
-// ==========================================================================
-//
-// ------------------------ C -----------------------------------------------
 
+// ------------------------ C -----------------------------------------------
 int is_text_file(const char *buffer, size_t size) {
-  for (size_t i = 0; i < size; ++i) {
-    if (!(isprint(buffer[i]) || buffer[i] == '\n' || buffer[i] == '\r' || buffer[i] == '\t')) {
-      return 0; 
-    }
+  for (size_t i = 0; i < size; i++) {
+    if (!isprint(buffer[i]) && !isspace(buffer[i])) return 0;
   }
-  return 1; 
+  return 1;
 }
 
 static const char base64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -122,72 +97,54 @@ char *base64_encode(const unsigned char *src, size_t len, size_t *out_len) {
   char *out = malloc(olen + 1);
   if (!out) return NULL;
 
-  size_t i, j;
-  for (i = 0, j = 0; i < len;) {
-    uint32_t octet_a = i < len ? src[i++] : 0;
-    uint32_t octet_b = i < len ? src[i++] : 0;
-    uint32_t octet_c = i < len ? src[i++] : 0;
-
-    uint32_t triple = (octet_a << 16) | (octet_b << 8) | octet_c;
+  size_t j = 0;
+  for (size_t i = 0; i < len; i += 3) {
+    uint32_t triple = src[i] << 16;
+    if (i+1 < len) triple |= src[i+1] << 8;
+    if (i+2 < len) triple |= src[i+2];
 
     out[j++] = base64_table[(triple >> 18) & 0x3F];
     out[j++] = base64_table[(triple >> 12) & 0x3F];
-    out[j++] = (i > len + 1) ? '=' : base64_table[(triple >> 6) & 0x3F];
-    out[j++] = (i > len) ? '=' : base64_table[triple & 0x3F];
+    out[j++] = (i+1 < len) ? base64_table[(triple >> 6) & 0x3F] : '=';
+    out[j++] = (i+2 < len) ? base64_table[triple & 0x3F] : '=';
   }
-
   out[j] = '\0';
   if (out_len) *out_len = j;
   return out;
 }
 
-void filter_text(char *content, size_t max_size) {
-  size_t input_pos = 0, output_pos = 0;
-  size_t res = strlen(content); 
-  char temp[max_size + 1];
-  memset(temp, 0, sizeof(temp));
+char *filter_text(const char *content) {
+  size_t len = strlen(content);
+  char *result = malloc(len * 5 + 1);
+  if (!result) return NULL;
 
-  while (input_pos < res && output_pos < max_size - 1) {
-    int word_matched = 0;
+  char *out = result;
+  while (*content) {
+    int replaced = 0;
     for (int i = 0; i < config.filter_count; i++) {
       size_t word_len = strlen(config.filter_words[i]);
-      if (input_pos + word_len <= res &&
-        strncasecmp(&content[input_pos], config.filter_words[i], word_len) == 0) {
-
-        memcpy(&temp[output_pos], "lawak", 5);
-        input_pos += word_len;
-        output_pos += 5;
-        word_matched = 1;
+      if (strncasecmp(content, config.filter_words[i], word_len) == 0) {
+        memcpy(out, "lawak", 5);
+        out += 5;
+        content += word_len;
+        replaced = 1;
         break;
       }
     }
-
-    if (!word_matched) {
-      temp[output_pos++] = content[input_pos++];
-    }
+    if (!replaced) *out++ = *content++;
   }
-
-  temp[output_pos] = '\0'; 
-
-  strncpy(content, temp, max_size - 1);
-  content[max_size - 1] = '\0';
+  *out = '\0';
+  return result;
 }
-
-//
 // ------------------------ C ----------------------------------------------
-//
-// ==========================================================================
-// 
-// ------------------------ B ----------------------------------------------- 
 
+// ------------------------ B ----------------------------------------------- 
 int is_within_access_time() {
   time_t now = time(NULL);
   struct tm *local = localtime(&now);
-
   int now_minutes = local->tm_hour * 60 + local->tm_min;
   int start_minutes = config.access_start_hour * 60 + config.access_start_min;
-  int end_minutes   = config.access_end_hour * 60 + config.access_end_min;
-
+  int end_minutes = config.access_end_hour * 60 + config.access_end_min;
   return now_minutes >= start_minutes && now_minutes <= end_minutes;
 }
 
@@ -196,20 +153,17 @@ int is_secret_file(const char *filename) {
   base = base ? base + 1 : filename;
 
   char *name = remove_extension(base);
-  int result = strcmp(name, config.secret_file_basename) == 0;
-  free(name);  // Added: Free allocated memory
+  int result = name && strcmp(name, config.secret_file_basename) == 0;
+  free(name);
   return result;
 }
-
 // ------------------------ B -----------------------------------------------
-// 
-// ==========================================================================
-// 
-// ------------------------ A ----------------------------------------------- 
 
+// ------------------------ A ----------------------------------------------- 
 static char *map_path(const char *path) {
   const char *rel_path = (path[0] == '/') ? path + 1 : path;
-  if (strlen(rel_path) == 0) rel_path = ".";
+  if (!rel_path[0]) rel_path = ".";
+
   char *full_path = malloc(strlen(source_dir) + strlen(rel_path) + 2);
   sprintf(full_path, "%s/%s", source_dir, rel_path);
   return full_path;
@@ -218,6 +172,7 @@ static char *map_path(const char *path) {
 static char *remove_extension(const char *name) {
   char *dot = strrchr(name, '.');
   if (!dot) return strdup(name);
+
   size_t len = dot - name;
   char *res = malloc(len + 1);
   strncpy(res, name, len);
@@ -230,36 +185,32 @@ char *hidden_extension(const char *dir_path, const char *name) {
   if (!dir) return NULL;
 
   struct dirent *entry;
+  char *result = NULL;
+
   while ((entry = readdir(dir))) {
-    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
-      continue;
+    if (strcmp(entry->d_name, ".") == 0 || 
+      strcmp(entry->d_name, "..") == 0) continue;
 
     if (strcmp(entry->d_name, name) == 0) {
-      char *result = strdup(entry->d_name);
-      closedir(dir);
-      return result;
+      result = strdup(entry->d_name);
+      break;
     }
 
     char *no_ext = remove_extension(entry->d_name);
-    if (strcmp(no_ext, name) == 0) {
-      char *result = strdup(entry->d_name);
+    if (no_ext && strcmp(no_ext, name) == 0) {
+      result = strdup(entry->d_name);
       free(no_ext);
-      closedir(dir);
-      return result;
+      break;
     }
     free(no_ext);
   }
 
   closedir(dir);
-  return NULL;
+  return result;
 }
-
 // ------------------------ A -----------------------------------------------
-//
-// ==========================================================================
-//
-// ------------------------ MAIN --------------------------------------------
 
+// ------------------------ MAIN --------------------------------------------
 static int fs_access(const char *path, int mask) {
   const char *fuse_name = strrchr(path, '/');
   fuse_name = fuse_name ? fuse_name + 1 : path;
@@ -277,52 +228,40 @@ static int fs_access(const char *path, int mask) {
     return -ENOENT;
   }
 
-  size_t len = strlen(dir_path) + strlen(real_name) + 2;
-  char *full_path = malloc(len);
-  snprintf(full_path, len, "%s/%s", dir_path, real_name);
-
-  int res = access(full_path, mask);
+  char full_path[PATH_MAX];
+  snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, real_name);
+  int res = access(full_path, mask) ? -errno : 0;
 
   free(dir_path);
   free(real_name);
-  free(full_path);
 
-  if (res == 0) {
-    log_action("ACCESS", path);
-    return 0;
-  }
-  return -errno;
-
+  if (res == 0) log_action("ACCESS", path);
+  return res;
 }
 
 static int fs_getattr(const char *path, struct stat *stbuf) {
   if (strcmp(path, "/") == 0)
-    return stat(source_dir, stbuf) == 0 ? 0 : -errno;
+    return stat(source_dir, stbuf) ? -errno : 0;
 
   const char *fuse_name = strrchr(path, '/');
   fuse_name = fuse_name ? fuse_name + 1 : path;
 
   char *real_name = hidden_extension(source_dir, fuse_name);
-  if (!real_name) {
-    return -ENOENT;
-  }
+  if (!real_name) return -ENOENT;
 
   if (is_secret_file(real_name) && !is_within_access_time()) {
     free(real_name);
     return -ENOENT;
   }
 
-  char *full_path = map_path(real_name); 
+  char *full_path = map_path(real_name);
+  int res = stat(full_path, stbuf) ? -errno : 0;
 
-  int res = stat(full_path, stbuf);
   free(real_name);
   free(full_path);
-  if (res == 0) {
-    log_action("GETATTR", path);  
-    return 0;
-  }
-  return -errno;
 
+  if (res == 0) log_action("GETATTR", path);
+  return res;
 }
 
 static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
@@ -337,23 +276,16 @@ static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
   filler(buf, "..", NULL, 0);
 
   struct dirent *entry;
-  while ((entry = readdir(dir)) != NULL) {
-    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-      continue;
-    }
+  while ((entry = readdir(dir))) {
+    if (strcmp(entry->d_name, ".") == 0 || 
+      strcmp(entry->d_name, "..") == 0) continue;
 
-    if (is_secret_file(entry->d_name) && !is_within_access_time()) {
-      continue;
-    }
+    if (is_secret_file(entry->d_name) && !is_within_access_time()) continue;
 
     char *name_no_ext = remove_extension(entry->d_name);
     if (name_no_ext) {
-      int fill_result = filler(buf, name_no_ext, NULL, 0);
+      filler(buf, name_no_ext, NULL, 0);
       free(name_no_ext);
-      
-      if (fill_result != 0) {
-        break;
-      }
     }
   }
 
@@ -363,72 +295,59 @@ static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t
 }
 
 static int fs_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
-  const char *fuse_name = strrchr(path, '/');
-  fuse_name = fuse_name ? fuse_name + 1 : path;
+  struct stat st;
+  if (fstat(fi->fh, &st)) return -errno;
 
-  if (is_secret_file(fuse_name) && !is_within_access_time())
-    return -ENOENT;
+  char *content = malloc(st.st_size);
+  if (!content) return -ENOMEM;
 
-  char *temp_buf = malloc(size + 1);
-  if (!temp_buf) return -ENOMEM;
-
-  int res = pread(fi->fh, temp_buf, size, offset);
-  if (res == -1) {
-    free(temp_buf);
-    return -errno;
+  ssize_t bytes_read = pread(fi->fh, content, st.st_size, 0);
+  if (bytes_read != st.st_size) {
+    free(content);
+    return -EIO;
   }
 
-  temp_buf[res] = '\0'; 
-  int is_text = is_text_file(temp_buf, res);
+  char *processed = NULL;
+  size_t processed_len = 0;
 
-  if (is_text) {
-    filter_text(temp_buf, size + 1);
-
-    strncpy(buf, temp_buf, size);
-    buf[size - 1] = '\0'; 
-    res = strlen(buf);    
-    free(temp_buf);
-    log_action("READ", path);
-    return res;
+  if (is_text_file(content, st.st_size)) {
+    processed = filter_text(content);
+    processed_len = processed ? strlen(processed) : 0;
   } else {
-    size_t encoded_len;
-    char *encoded = base64_encode((unsigned char *)temp_buf, res, &encoded_len);
-    free(temp_buf);
-    if (!encoded) return -ENOMEM;
-
-    if (offset >= encoded_len) {
-      free(encoded);
-      return 0;
-    }
-
-    size_t to_copy = encoded_len - offset;
-    if (to_copy > size) to_copy = size;
-
-    memcpy(buf, encoded + offset, to_copy);
-    free(encoded);
-    log_action("READ", path);
-    return to_copy;
+    processed = base64_encode((unsigned char *)content, st.st_size, &processed_len);
   }
+  free(content);
+
+  if (!processed) return -ENOMEM;
+
+  if (offset >= processed_len) {
+    free(processed);
+    return 0;
+  }
+
+  size_t to_copy = processed_len - offset;
+  if (to_copy > size) to_copy = size;
+
+  memcpy(buf, processed + offset, to_copy);
+  free(processed);
+
+  log_action("READ", path);
+  return to_copy;
 }
 
 static int fs_open(const char *path, struct fuse_file_info *fi) {
   const char *fuse_name = strrchr(path, '/');
   fuse_name = fuse_name ? fuse_name + 1 : path;
 
-
   char *real_name = hidden_extension(source_dir, fuse_name);
-  if (!real_name) {
-    return -ENOENT;
-  }
+  if (!real_name) return -ENOENT;
 
   if (is_secret_file(real_name) && !is_within_access_time()) {
     free(real_name);
     return -ENOENT;
   }
 
-
   char *full_path = map_path(real_name);
-
   int fd = open(full_path, fi->flags);
   free(real_name);
   free(full_path);
