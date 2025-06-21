@@ -282,6 +282,7 @@ secara singkan fungsi di atas akan menangani command `ls`. awalnya buka director
 kedua fungsi di atas masing-masing berguna untuk menangani pembukaan file dan dan pembacaan file.
 
 - **Screenshots :**
+
 a.
 <div align="center">
     <img src="./img/task-1a.png" width="500"/>
