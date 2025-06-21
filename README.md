@@ -585,12 +585,12 @@ terdapat fungsi tambahan yang akan digunakan untuk mengimplementasikan fitur-fit
   dengan struct `config` sebagai berikut:
   ```c
   typedef struct {
-    char *filter_words[MAX_FILTER_WORDS];
-    int filter_count;
-    char secret_file_basename[256];
-    int access_start_hour, access_start_min;
-    int access_end_hour, access_end_min;
-  } lawak_config;
+    char *filter_words[MAX_FILTER_WORDS]; // variabel untuk menyimpan kata yang difilter
+    int filter_count; // variabel yang menyimpan jumlah dari kata yang difilter
+    char secret_file_basename[256]; // variabel yang menyimpan nama dari file secret
+    int access_start_hour, access_start_min; // variabel yang menyimpan jam dan menit dimulainya waktu akses file secret
+    int access_end_hour, access_end_min; // variabel yang menyimpan jam dan menit berakhirnya waktu akses file secret
+  } lawak_config; // struct untuk meyimpan hasil parsing dari file config
   ```
 
   maka parsing file konfigurasi tersebut menjadi struct `config` adalah sebagai berikut:
