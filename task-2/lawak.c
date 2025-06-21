@@ -14,6 +14,7 @@
 #include <stdint.h>
 
 #define MAX_FILTER_WORDS 100
+#define PATH_MAX 4096
 #define LOG_PATH "/home/blackcurrent/Kuliah_Semester_2/SisOp_Praktikum_4/task-2/lawakfs.log"
 
 static const char *source_dir = NULL;
