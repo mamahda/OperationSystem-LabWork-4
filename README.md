@@ -694,7 +694,7 @@ terdapat fungsi tambahan yang akan digunakan untuk mengimplementasikan fitur-fit
 
   - **Screenshots:** <br>
     <div align="left">
-      <img src="./img/task-2.png" width="600"/>
+      <img src="./img/task-2.png" width="500"/>
     </div>
 
   
