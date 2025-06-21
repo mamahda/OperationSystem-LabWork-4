@@ -301,3 +301,401 @@ result:
 <div align="center">
     <img src="./img/task-1.png" width="500"/>
 </div>
+
+### Task-2 LawakFS++
+**Answer:**
+- **Code & explanation:** <br>
+Untuk menyelesaikan task ini, kita akan membuat sebuah sistem file yang memiliki beberapa fitur keamanan dan akses kontrol. Sistem file ini akan menggunakan FUSE (Filesystem in Userspace) untuk mengimplementasikan fungsionalitasnya. <br>
+terdapat fungsi tambahan yang akan digunakan untuk mengimplementasikan fitur-fitur yang diminta pada soal, yaitu:
+
+- fungsi `map_path`:
+  ``` c
+  static char *map_path(const char *path) {
+    const char *rel_path = (path[0] == '/') ? path + 1 : path; // menghapus karakter '/' pertama jika ada
+    if (!rel_path[0]) rel_path = "."; // jika rel_path kosong, set rel_path menjadi "."
+
+    char *full_path = malloc(strlen(source_dir) + strlen(rel_path) + 2); // alokasikan memori untuk full_path
+    sprintf(full_path, "%s/%s", source_dir, rel_path); // menggabungkan source_dir dan rel_path menjadi full_path
+    return full_path; // kembalikan full_path
+  }
+  ```
+  Fungsi `map_path` akan mengubah path relatif menjadi path absolut dengan menggabungkan `source_dir` dan `path` yang diberikan. Jika path dimulai dengan '/', maka karakter tersebut akan dihapus. Jika path kosong, maka akan di-set menjadi '.' (current directory).
+
+
+  #### **a. Ekstensi File Tersembunyi** <br >
+  Untuk mengimplementasikan ekstensi file tersembunyi, kita perlu memodifikasi fungsi `fs_readdir` untuk menambahkan ekstensi pada setiap file yang ada di dalam direktori yang dibaca.
+
+  - fungsi `fs_readdir`:
+    ```c
+    static int fs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
+      ... // kode lainnya
+
+      struct dirent *entry; // deklarasi variabel entry untuk menyimpan informasi tentang file yang dibaca
+      while ((entry = readdir(dir))) { // loop membaca setiap entry di dalam direktori
+        if (strcmp(entry->d_name, ".") == 0 || 
+          strcmp(entry->d_name, "..") == 0) continue; // skip current dan parent directory
+
+        if (is_secret_file(entry->d_name) && !is_within_access_time()) continue; // skip secret file diluar waktu akses
+
+        char *name_no_ext = remove_extension(entry->d_name); // menghapus ekstensi dari nama file
+        if (name_no_ext) { // cek jika name_no_ext tidak NULL
+          filler(buf, name_no_ext, NULL, 0); // tambahkan nama file tanpa ekstensi ke buffer
+          free(name_no_ext); // bebaskan memori yang dialokasikan untuk name_no_ext
+        }
+      }
+      ... // kode lainnya
+    }
+    ```
+    Pada kode di atas, kita menggunakan fungsi `remove_extension` untuk menghapus ekstensi dari nama file yang dibaca. Fungsi ini akan mengembalikan nama file tanpa ekstensi tersebut.
+
+  - fungsi `remove_extension`:
+    ```c
+    static char *remove_extension(const char *name) {
+      char *dot = strrchr(name, '.'); // mencari karakter terakhir '.' pada nama file
+      if (!dot) return strdup(name); // jika tidak ada '.', kembalikan nama file apa adanya
+
+      size_t len = dot - name; // menghitung panjang nama file tanpa ekstensi
+      char *res = malloc(len + 1); // alokasikan memori untuk nama file tanpa ekstensi
+      strncpy(res, name, len); // salin nama file tanpa ekstensi ke dalam res
+      res[len] = '\0'; // tambahkan null terminator di akhir string
+      return res; // kembalikan nama file tanpa ekstensi
+    } 
+    ```
+    Fungsi `remove_extension` akan mencari karakter terakhir `.` pada nama file dan mengembalikan nama file tanpa ekstensi. Jika tidak ada ekstensi, maka nama file akan dikembalikan apa adanya.
+
+  - fungsi `hidden_file`:
+    ```c
+    char *hidden_extension(const char *dir_path, const char *name) {
+      DIR *dir = opendir(dir_path); // buka directori tujuan
+      if (!dir) return NULL; // jika gagal membuka direktori, kembalikan NULL
+
+      struct dirent *entry; // deklarasi variabel entry untuk menyimpan informasi tentang file yang dibaca
+      char *result = NULL; // inisialisasi result dengan NULL
+
+      while ((entry = readdir(dir))) { // loop membaca setiap entry di dalam direktori
+        if (strcmp(entry->d_name, ".") == 0 || 
+          strcmp(entry->d_name, "..") == 0) continue; // skip current dan parent directory
+
+        if (strcmp(entry->d_name, name) == 0) { // jika nama file sama dengan yang dicari
+          result = strdup(entry->d_name); // salin nama file ke result
+          break; // keluar dari loop
+        }
+
+        char *no_ext = remove_extension(entry->d_name); // menghapus ekstensi dari nama file
+        if (no_ext && strcmp(no_ext, name) == 0) { // jika nama file tanpa ekstensi sama dengan yang dicari
+          result = strdup(entry->d_name); // salin nama file dengan ekstensi ke result
+          free(no_ext); // bebaskan memori yang dialokasikan untuk no_ext
+          break; // keluar dari loop
+        }
+        free(no_ext); // bebaskan memori yang dialokasikan untuk no_ext jika tidak digunakan
+      }
+
+      closedir(dir); // tutup direktori yang telah dibuka
+      return result; // kembalikan nama file dengan ekstensi atau NULL jika tidak ditemukan
+    }
+    ```
+    Fungsi `hidden_extension` akan mencari file(dengan ekstensi) menggunakan nama(tanpa ekstensi) yang diberikan di dalam direktori yang diberikan. Jika ditemukan, fungsi ini akan mengembalikan nama file tersebut dengan ekstensi. Jika tidak ditemukan, maka akan mengembalikan NULL.
+  
+  dengan demikian, kita telah berhasil mengimplementasikan ekstensi file tersembunyi pada sistem file kita. Setiap file yang memiliki ekstensi akan disembunyikan dari daftar file yang ditampilkan saat membaca direktori. Hanya nama file tanpa ekstensi yang akan ditampilkan.
+
+  #### **b. Akses Berbasis Waktu untuk File Secret** <br>
+  Untuk mengimplementasikan akses berbasis waktu untuk file secret, kita perlu menambahkan beberapa fungsi tambahan untuk memeriksa apakah file secret dapat diakses pada waktu tertentu.
+
+  - fungsi `is_secret_file`:
+    ```c
+    int is_secret_file(const char *filename) {
+      const char *base = strrchr(filename, '/'); // mencari karakter '/' terakhir pada nama file
+      base = base ? base + 1 : filename; // jika ada '/', ambil nama file setelahnya, jika tidak, gunakan nama file apa adanya
+
+      char *name = remove_extension(base); // menghapus ekstensi dari nama file
+      int result = name && strcmp(name, config.secret_file_basename) == 0; // membandingkan nama file tanpa ekstensi dengan nama dasar file secret yang telah ditentukan dalam konfigurasi
+      free(name); // bebaskan memori yang dialokasikan untuk name
+      return result; // kembalikan 1 jika nama file cocok dengan nama dasar file secret, 0 jika tidak
+    }
+    ```
+    Fungsi `is_secret_file` akan memeriksa apakah nama file yang diberikan adalah file secret berdasarkan nama dasar yang telah ditentukan dalam konfigurasi. Jika nama file cocok, maka fungsi ini akan mengembalikan nilai true (1), jika tidak, maka akan mengembalikan false (0).
+  
+  - fungsi `is_within_access_time`:
+    ```c
+    int is_within_access_time() {
+      time_t now = time(NULL); // mendapatkan waktu saat ini
+      struct tm *local = localtime(&now); // mengonversi waktu saat ini ke dalam format lokal
+      int now_minutes = local->tm_hour * 60 + local->tm_min; // menghitung waktu saat ini dalam menit
+      int start_minutes = config.access_start_hour * 60 + config.access_start_min; // menghitung waktu mulai akses dalam menit
+      int end_minutes = config.access_end_hour * 60 + config.access_end_min; // menghitung waktu akhir akses dalam menit
+      return now_minutes >= start_minutes && now_minutes <= end_minutes; // memeriksa apakah waktu saat ini berada dalam rentang waktu akses yang telah ditentukan
+    }
+    ```
+    Fungsi `is_within_access_time` akan memeriksa apakah waktu saat ini berada dalam rentang waktu akses yang telah ditentukan dalam konfigurasi. Jika ya, maka fungsi ini akan mengembalikan nilai true (1), jika tidak, maka akan mengembalikan false (0).
+
+    selain itu, kita juga perlu untuk menambahkan baris kode:
+    ```c
+    if (is_secret_file(real_name) && !is_within_access_time()) {
+      ... // kode lainnya
+      return -ENOENT; // return file not found jika file secret diakses diluar waktu akses
+    }
+    ```
+    pada fungsi `fs_getattr`, `fs_access` dan `fs_open` untuk memeriksa apakah file yang diminta adalah file secret dan apakah aksesnya berada dalam rentang waktu yang diizinkan. Jika tidak, maka akan mengembalikan error `ENOENT` (file not found).
+
+  dengan demikian, kita telah berhasil mengimplementasikan akses berbasis waktu untuk file secret pada sistem file kita. File secret hanya dapat diakses pada waktu tertentu yang telah ditentukan dalam konfigurasi.
+
+  #### **c. Filtering Konten Dinamis** <br>
+  Untuk mengimplementasikan filtering konten dinamis, kita perlu menambahkan beberapa fungsi tambahan untuk memfilter konten file berdasarkan kriteria tertentu.
+
+  - fungsi `fs_read`:
+      ```c
+      static int fs_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+        ... // kode lainnya
+
+        char *processed = NULL; // inisialisasi variabel processed dengan NULL
+        size_t processed_len = 0; // inisialisasi panjang konten yang telah diproses dengan 0
+
+        if (is_text_file(content, st.st_size)) { // memeriksa apakah file adalah file teks
+          processed = filter_text(content); // memfilter konten file teks
+          processed_len = processed ? strlen(processed) : 0; // mendapatkan panjang konten yang telah diproses
+        } else { // jika file bukan file teks
+          processed = base64_encode((unsigned char *)content, st.st_size, &processed_len); // mengkodekan konten binary file ke dalam format Base64
+        }
+        free(content); // bebaskan memori yang dialokasikan untuk konten file
+
+        if (!processed) return -ENOMEM; // jika alokasi memori untuk konten yang telah diproses gagal, kembalikan error ENOMEM
+
+        if (offset >= processed_len) { // jika offset lebih besar atau sama dengan panjang konten yang telah diproses
+          free(processed); // bebaskan memori yang dialokasikan untuk konten yang telah diproses
+          return 0; // kembalikan 0 (tidak ada data yang dibaca)
+        }
+        
+        ... // kode lainnya
+      }
+      ```
+      Pada kode di atas, kita memeriksa apakah file yang dibaca adalah file teks atau bukan. Jika file tersebut adalah file teks, maka kita akan memanggil fungsi `filter_text` untuk memfilter konten file tersebut. Jika bukan, maka kita akan mengkodekan konten file tersebut ke dalam format Base64 menggunakan fungsi `base64_encode`.
+
+  - fungsi `is_text_file`:
+    ```c
+    int is_text_file(const char *buffer, size_t size) {
+      for (size_t i = 0; i < size; i++) { // iterasi setiap karakter dalam buffer
+        if (!isprint(buffer[i]) && !isspace(buffer[i])) return 0; // jika ada karakter yang bukan printable atau whitespace, kembalikan 0 (bukan file teks)
+      }
+      return 1; // jika semua karakter adalah printable atau whitespace, kembalikan 1 (file teks)
+    }
+    ```
+    Fungsi `is_text_file` akan memeriksa apakah konten file adalah file teks dengan memeriksa setiap karakter dalam buffer. Jika ada karakter yang bukan printable atau whitespace, maka fungsi ini akan mengembalikan nilai false (0), jika semua karakter adalah printable atau whitespace, maka akan mengembalikan nilai true (1).
+
+  - fungsi `filter_text`:
+    ```c
+    char *filter_text(const char *content) {
+      size_t len = strlen(content); // mendapatkan panjang konten
+      char *result = malloc(len * 5 + 1); // alokasikan memori untuk hasil filter, dengan asumsi setiap kata yang diganti akan diganti dengan "lawak" (5 karakter)
+      if (!result) return NULL; // jika alokasi memori gagal, kembalikan NULL
+
+      char *out = result; // inisialisasi pointer out untuk menulis hasil filter
+      while (*content) { // iterasi setiap karakter dalam konten
+        int replaced = 0; // inisialisasi variabel replaced dengan 0 (tidak ada kata yang diganti)
+        for (int i = 0; i < config.filter_count; i++) { // iterasi setiap kata yang ada dalam daftar filter
+          size_t word_len = strlen(config.filter_words[i]); // mendapatkan panjang kata yang ada dalam daftar filter
+          if (strncasecmp(content, config.filter_words[i], word_len) == 0) { // jika kata yang ada dalam daftar filter cocok dengan konten
+            memcpy(out, "lawak", 5); // ganti kata yang cocok dengan "lawak"
+            out += 5; // pindahkan pointer out ke posisi setelah "lawak"
+            content += word_len; // pindahkan pointer content ke posisi setelah kata yang cocok
+            replaced = 1; // tandai bahwa ada kata yang telah diganti
+            break; // keluar dari loop jika ada kata yang diganti
+          }
+        }
+        if (!replaced) *out++ = *content++; // jika tidak ada kata yang diganti, salin karakter saat ini ke hasil filter
+      }
+      *out = '\0'; // tambahkan null terminator di akhir string hasil filter
+      return result; // kembalikan hasil filter
+    }
+    ```
+    Fungsi `filter_text` akan memfilter konten file teks dengan mengganti setiap kata yang cocok dengan kata yang ada dalam daftar filter dengan kata "lawak". Jika tidak ada kata yang cocok, maka karakter tersebut akan tetap ditampilkan.
+  - fungsi `base64_encode`:
+    ```c
+    static const char base64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"; // tabel untuk encoding Base64
+
+    char *base64_encode(const unsigned char *src, size_t len, size_t *out_len) {
+      size_t olen = 4 * ((len + 2) / 3); // menghitung panjang output Base64
+      char *out = malloc(olen + 1); // alokasikan memori untuk output Base64
+      if (!out) return NULL; // jika alokasi memori gagal, kembalikan NULL
+
+      size_t j = 0; // inisialisasi indeks untuk output Base64
+      for (size_t i = 0; i < len; i += 3) { // iterasi setiap 3 byte dari input
+        uint32_t triple = src[i] << 16; // menggeser byte pertama ke kiri 16 bit
+        if (i+1 < len) triple |= src[i+1] << 8; // menggeser byte kedua ke kiri 8 bit jika ada
+        if (i+2 < len) triple |= src[i+2]; // menggeser byte ketiga ke posisi paling kanan jika ada
+
+        out[j++] = base64_table[(triple >> 18) & 0x3F]; // mengambil 6 bit pertama dari triple dan mengonversinya ke karakter Base64
+        out[j++] = base64_table[(triple >> 12) & 0x3F]; // mengambil 6 bit kedua dari triple dan mengonversinya ke karakter Base64
+        out[j++] = (i+1 < len) ? base64_table[(triple >> 6) & 0x3F] : '='; // mengambil 6 bit ketiga dari triple dan mengonversinya ke karakter Base64, jika tidak ada byte ketiga, tambahkan '=' sebagai padding
+        out[j++] = (i+2 < len) ? base64_table[triple & 0x3F] : '='; // mengambil 6 bit terakhir dari triple dan mengonversinya ke karakter Base64, jika tidak ada byte keempat, tambahkan '=' sebagai padding
+      }
+      out[j] = '\0'; // tambahkan null terminator di akhir string output Base64
+      if (out_len) *out_len = j; // jika out_len tidak NULL, set panjang output Base64
+      return out; // kembalikan output Base64
+    }
+    ```
+    Fungsi `base64_encode` akan mengkodekan konten file binary ke dalam format Base64. Fungsi ini akan mengembalikan string yang berisi hasil encoding Base64 dari konten file.
+
+  dengan demikian, kita telah berhasil mengimplementasikan filtering konten dinamis pada sistem file kita. Konten file teks akan difilter dengan mengganti kata-kata tertentu dengan "lawak", sedangkan konten file binary akan dikodekan ke dalam format Base64.
+
+  #### **d. Logging Akses** <br>
+  Untuk mengimplementasikan logging akses, kita perlu menambahkan fungsi tambahan untuk mencatat setiap akses yang dilakukan pada sistem file.
+
+  - fungsi `log_access`:
+    ```c
+    void log_action(const char *action, const char *path) {
+      ... // kode lainnya
+
+      FILE *log_file = fopen(LOG_PATH, "a"); // membuka file log untuk ditambahkan
+      if (!log_file) return; // jika gagal membuka file log, keluar dari fungsi
+
+      time_t now = time(NULL); // mendapatkan waktu saat ini
+      struct tm *t = localtime(&now); // mengonversi waktu saat ini ke dalam format lokal
+      char time_str[20];
+      strftime(time_str, sizeof(time_str), "%F %T", t); // mengonversi waktu ke dalam format string
+
+      fprintf(log_file, "[%s] [%d] [%s] %s\n", time_str, getuid(), action, path); // mencatat waktu, UID, jenis akses, dan path file yang diakses
+      fclose(log_file); // menutup file log
+    }
+    ```
+    Fungsi `log_access` akan mencatat setiap akses yang dilakukan pada sistem file. Fungsi ini akan mencatat waktu akses, jenis akses (misalnya "read", "write", "open"), dan path file yang diakses.
+
+  tambahkan pemanggilan fungsi `log_action` pada fungsi-fungsi yang menangani akses file, seperti `fs_getattr`, `fs_open`, `fs_read`, dan `fs_write`. Contohnya:
+    ```c
+    static int fs_getattr(const char *path, struct stat *stbuf) {
+      ... // kode lainnya
+
+      if (res == 0) log_action("GETATTR", path); // mencatat akses getattr jika sukses
+      return 0; // kembalikan 0 jika sukses
+    }
+    ```
+
+  dengan demikian, kita telah berhasil mengimplementasikan logging akses pada sistem file kita. Setiap akses yang dilakukan pada sistem file akan dicatat dalam file log yang telah ditentukan.
+
+  #### **e. Konfigurasi** <br>
+  Untuk mengimplementasikan konfigurasi, kita perlu menambahkan beberapa fungsi tambahan untuk membaca dan menyimpan konfigurasi sistem file.
+
+  contoh file konfigurasi `lawakfs.conf`:
+  ```
+  FILTER_WORDS=ducati,ferrari,mu,chelsea,prx,onic,sisop
+  SECRET_FILE_BASENAME=secret
+  ACCESS_START=08:00
+  ACCESS_END=18:00
+  ```
+
+  dengan struct `config` sebagai berikut:
+  ```c
+  typedef struct {
+    char *filter_words[MAX_FILTER_WORDS];
+    int filter_count;
+    char secret_file_basename[256];
+    int access_start_hour, access_start_min;
+    int access_end_hour, access_end_min;
+  } lawak_config;
+  ```
+
+  maka parsing file konfigurasi tersebut menjadi struct `config` adalah sebagai berikut:
+  
+  - fungsi `parsing_config`:
+
+    ```c
+    lawak_config config; // deklarasi variabel global untuk menyimpan konfigurasi
+
+    void parsing_config(const char *config_path) { 
+      FILE *fp = fopen(config_path, "r"); // membuka file konfigurasi untuk dibaca
+      if (!fp) {  // jika gagal membuka file konfigurasi
+        perror("Gagal membuka file konfigurasi"); // tampilkan pesan error
+        exit(EXIT_FAILURE); // keluar dari program dengan status error
+      }
+
+      char line[1024]; // buffer untuk menyimpan setiap baris dari file konfigurasi
+      while (fgets(line, sizeof(line), fp)) { // membaca setiap baris dari file konfigurasi
+        line[strcspn(line, "\r\n")] = '\0'; // menghapus karakter newline di akhir baris
+
+        if (strncmp(line, "FILTER_WORDS=", 13) == 0) { // jika baris dimulai dengan "FILTER_WORDS="
+          char *words = line + 13; // mendapatkan kata-kata setelah "FILTER_WORDS="
+          char *token = strtok(words, ","); // memecah kata-kata berdasarkan koma
+          config.filter_count = 0; // inisialisasi jumlah filter words menjadi 0
+          while (token && config.filter_count < MAX_FILTER_WORDS) { // selama token tidak NULL dan jumlah filter words belum mencapai batas maksimum
+            config.filter_words[config.filter_count++] = strdup(token); // menyimpan token ke dalam array filter_words
+            token = strtok(NULL, ","); // mendapatkan token berikutnya
+          }
+        } else if (strncmp(line, "SECRET_FILE_BASENAME=", 21) == 0) { // jika baris dimulai dengan "SECRET_FILE_BASENAME="
+          strcpy(config.secret_file_basename, line + 21); // menyimpan nama dasar file secret ke dalam struct config
+        } else if (strncmp(line, "ACCESS_START=", 13) == 0) { // jika baris dimulai dengan "ACCESS_START="
+          sscanf(line + 13, "%d:%d", &config.access_start_hour, &config.access_start_min); // membaca jam dan menit dari waktu mulai akses
+        } else if (strncmp(line, "ACCESS_END=", 11) == 0) { // jika baris dimulai dengan "ACCESS_END="
+          sscanf(line + 11, "%d:%d", &config.access_end_hour, &config.access_end_min); // membaca jam dan menit dari waktu akhir akses
+        }
+      }
+      fclose(fp); // menutup file konfigurasi
+    }
+    ```
+    Fungsi `parsing_config` akan membaca file konfigurasi dan menyimpan nilai-nilai yang ditemukan ke dalam struct `config`. Fungsi ini akan memecah kata-kata yang ada dalam daftar filter berdasarkan koma, dan menyimpan nama dasar file secret serta waktu akses yang diizinkan.
+
+  lalu panggil fungsi `parsing_config` pada fungsi `main` sebelum memulai FUSE:
+  ```c
+  int main(int argc, char *argv[]) {
+    ... // kode lainnya
+
+    parsing_config("./lawak.conf"); // membaca konfigurasi dari file lawak.conf yang terletak di direktori yang sama dengan program
+
+    ... // kode lainnya yang memulai FUSE
+  }
+  ```
+
+  dengan demikian, kita telah berhasil mengimplementasikan konfigurasi pada sistem file kita. Konfigurasi dapat dibaca dari file eksternal dan digunakan untuk mengatur perilaku sistem file.
+
+  ### **Main FUSE Funtion**
+  
+  - struct `fuse_operations`:
+
+    ```c
+    static struct fuse_operations hideext_oper = {
+      .getattr = fs_getattr, // fungsi untuk mendapatkan atribut file
+      .readdir = fs_readdir, // fungsi untuk membaca direktori
+      .open    = fs_open, // fungsi untuk membuka file
+      .read    = fs_read, // fungsi untuk membaca file
+      .release = fs_release, // fungsi untuk melepaskan file setelah dibaca
+      .write   = fs_write, // fungsi untuk menulis ke file
+      .truncate = fs_truncate, // fungsi untuk memotong file
+      .create  = fs_create, // fungsi untuk membuat file baru
+      .unlink  = fs_unlink, // fungsi untuk menghapus file
+      .mkdir   = fs_mkdir, // fungsi untuk membuat directory baru
+      .rmdir   = fs_rmdir, // fungsi untuk menghapus directory
+      .rename  = fs_rename, // fungsi untuk mengganti nama file/directory
+      .access  = fs_access, // fungsi untuk menentukan akses user
+    };
+    ```
+
+  - fungsi `main`:
+    ```c
+    int main(int argc, char *argv[]) {
+      if (argc < 3) { // memeriksa jumlah argumen yang diberikan
+        fprintf(stderr, "Usage: %s <source_dir> <mountpoint>\n", argv[0]); // menampilkan pesan penggunaan jika argumen tidak cukup
+        return 1; // keluar dari program dengan status error
+      }
+
+      parsing_config("./lawak.conf"); // membaca konfigurasi dari file lawak.conf yang terletak di direktori yang sama dengan program
+      source_dir = realpath(argv[1], NULL); // mendapatkan path absolut dari direktori sumber
+      if (!source_dir) { // jika path tidak valid
+        perror("Invalid source directory"); // menampilkan pesan error
+        return 1; // keluar dari program dengan status error
+      }
+
+      char *fuse_argv[argc - 1]; // mempersiapkan argumen untuk FUSE
+      fuse_argv[0] = argv[0]; // 
+      for (int i = 2; i < argc; i++) 
+        fuse_argv[i - 1] = argv[i];// mengisi argumen FUSE dengan argumen yang diberikan
+
+      return fuse_main(argc - 1, fuse_argv, &hideext_oper, NULL); // memulai FUSE dengan argumen yang telah disiapkan
+    }
+    ```
+  Pada fungsi `main`, kita memeriksa apakah jumlah argumen yang diberikan cukup. Jika tidak, maka akan menampilkan pesan penggunaan dan keluar dari program. Kemudian, kita memanggil fungsi `parsing_config` untuk membaca konfigurasi dari file `lawak.conf`. Setelah itu, kita mendapatkan path absolut dari direktori sumber menggunakan `realpath`. Jika path tidak valid, maka akan menampilkan pesan error dan keluar dari program. Terakhir, kita mempersiapkan argumen untuk FUSE dan memanggil `fuse_main` untuk memulai sistem file.
+
+  - **Screenshots:** <br>
+    <div align="left">
+      <img src="./img/task-2.png" width="600"/>
+    </div>
+
+  
+  Dengan demikian, kita telah berhasil menyelesaikan task ini dengan mengimplementasikan berbagai fitur keamanan dan akses kontrol pada sistem file menggunakan FUSE.
