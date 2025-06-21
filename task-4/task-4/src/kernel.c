@@ -36,40 +36,35 @@ int main() {
 void printString(char* str) {
     while (*str != 0) {
         if (*str == '\n') {
-            interrupt(0x10, 0x0E << 8 | '\r', 0, 0, 0);
-            interrupt(0x10, 0x0E << 8 | '\n', 0, 0, 0);
+            interrupt(0x10, 0x0E00 | '\r', 0, 0, 0);
+            interrupt(0x10, 0x0E00 | '\n', 0, 0, 0);
         } else {
-            interrupt(0x10, 0x0E << 8 | *str, 0, 0, 0);
+            interrupt(0x10, 0x0E00 | *str, 0, 0, 0);
         }
         str++;
     }
 }
 
 void readString(char* buf) {
-    int index = 0;
-    int ch;
+    int index = 0, ch;
+    char tostr[2];
 
     while (1) {
-        ch = interrupt(0x16, 0x0000, 0x0000, 0x0000, 0x0000) & 0x00FF;
+        ch = interrupt(0x16, 0x0000, 0, 0, 0) & 0xFF;
         if (ch == 0x0D) {
-            printString("\n");
+            buf[index] = 0;
             break;
-        }
-
-        if (ch == 0x0008) {
+        } else if (ch == 0x08) {
             if (index > 0) {
                 index--;
-                interrupt(0x10, 0x0E << 8 | 0x08, 0, 0, 0);
-                interrupt(0x10, 0x0E << 8 | ' ', 0, 0, 0);
-                interrupt(0x10, 0x0E << 8 | 0x08, 0, 0, 0);
+                printString("\b \b");
             }
         } else {
             buf[index++] = ch;
-            interrupt(0x10, 0x000E << 8 | ch, 0x0000, 0x0000, 0x0000);
+            tostr[0] = ch; tostr[1] = 0;
+            printString(tostr);
         }
     }
-    // buf[index++] = '\n';
-    buf[index] = 0;
 }
 
 void clearScreen() {
@@ -125,7 +120,10 @@ void runCommand(char *buf) {
 
         if (type == CMD_ECHO) {
             strcpy(commands[i] + 5, pipeBuf); // echo[spasi]argumen
-            if (cmdCount == 1) printString(pipeBuf);
+            if (cmdCount == 1) {
+                printString(pipeBuf);
+                printString("\n");
+            }
         } else if (type == CMD_GREP) {
             if (strlen(commands[i]) <= 5) {
                 printString("Error: missing argument for grep\n");

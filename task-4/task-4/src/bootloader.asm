@@ -1,43 +1,41 @@
+; bootloader.asm
 bits 16
-org 0x7C00
 
-start:
-    mov si, msg
-    call print
+KERNEL_SEGMENT equ 0x1000 ; kernel will be loaded at 0x1000:0x0000
+KERNEL_SECTORS equ 15     ; kernel will be loaded in 15 sectors maximum
+KERNEL_START   equ 1      ; kernel will be loaded in sector 1
 
-    mov ah, 0x02          ; BIOS read sectors
-    mov al, 5             ; Read 5 sectors
-    mov ch, 0             ; Cylinder
-    mov cl, 2             ; Sector 2 (boot = 1)
-    mov dh, 0             ; Head
-    mov dl, 0             ; Drive 0 (floppy)
-    mov bx, 0x1000        ; Load to 0x1000
-    mov es, bx
-    xor bx, bx
-    int 0x13              ; BIOS interrupt
+; bootloader code
+bootloader:
+  ; load kernel to memory
+  mov ax, KERNEL_SEGMENT    ; load address of kernel
+  mov es, ax                ; buffer address are in ES:BX
+  mov bx, 0x0000            ; set buffer address to KERNEL_SEGMENT:0x0000
 
-    jc disk_error         ; jump if error
+  mov ah, 0x02              ; read disk sectors
+  mov al, KERNEL_SECTORS    ; number of sectors to read
 
-    jmp 0x1000:0000       ; Jump to loaded kernel
+  mov ch, 0x00              ; cylinder number
+  mov cl, KERNEL_START + 1  ; sector number
+  mov dh, 0x00              ; head number
+  mov dl, 0x00              ; read from drive A
 
-disk_error:
-    mov si, err
-    call print
-    jmp $
+  int 0x13                  ; call BIOS interrupts
 
-print:
-    mov ah, 0x0E
-.print_loop:
-    lodsb
-    or al, al
-    jz .done
-    int 0x10
-    jmp .print_loop
-.done:
-    ret
+  ; set up segment registers
+  mov ax, KERNEL_SEGMENT
+  mov ds, ax
+  mov es, ax
+  mov ss, ax
 
-msg db "LilHabOS booting...", 0
-err db "Disk error!", 0
+  ; set up stack pointer
+  mov ax, 0xFFF0
+  mov sp, ax
+  mov bp, ax
 
-times 510 - ($ - $$) db 0
-dw 0xAA55
+  ; jump to kernel
+  jmp KERNEL_SEGMENT:0x0000
+
+  ; padding to make bootloader 512 bytes
+  times 510-($-$$) db 0
+  dw 0xAA55
