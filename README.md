@@ -699,3 +699,415 @@ terdapat fungsi tambahan yang akan digunakan untuk mengimplementasikan fitur-fit
 
   
   Dengan demikian, kita telah berhasil menyelesaikan task ini dengan mengimplementasikan berbagai fitur keamanan dan akses kontrol pada sistem file menggunakan FUSE.
+
+### Task-4 LilhabOS
+**Answer:**
+- **Code & explanation:**
+
+<br>
+
+kernel.c
+```c
+#include "std_lib.h"
+#include "kernel.h"
+
+// Masukkan variabel global dan prototipe fungsi di sini
+#define MAX_COMMAND 16
+#define MAX_BUFFERS 128
+
+enum CommandType { CMD_ECHO, CMD_GREP, CMD_WC, CMD_ERR }; //enum untuk jenis command yang dijalankan
+
+char *grep(char *buf, char *arg);
+void wc(char *str);
+void runCommand(char *buf);
+int parseString(char *str, char *commands[]);
+bool prefix(char *cmd, char *type);
+enum CommandType getCmdType(char *cmd);
+char *strstr(char *str, char *substring);
+void toString(int integer, char *out);
+
+int main() {
+    char buf[128];
+    
+    clearScreen();
+    printString("LilHabOS - C07\n");
+    
+    while (1) {
+        printString("$> ");
+        readString(buf);
+        printString("\n");
+        
+        if (strlen(buf) > 0) {
+            runCommand(buf);
+        }
+    }
+}
+
+void printString(char* str) {
+    while (*str != 0) { // selama karakter bukan \0
+        if (*str == '\n') {
+          // jika ada karakter enter, maka pindahkan kursor ke awal baris lalu pindah ke baris baru
+            interrupt(0x10, 0x0E00 | '\r', 0, 0, 0);
+            interrupt(0x10, 0x0E00 | '\n', 0, 0, 0);
+        } else {
+          // jika karakter bukan enter, maka outputkan karakter tersebut ke kernel
+            interrupt(0x10, 0x0E00 | *str, 0, 0, 0);
+        }
+        str++;
+    }
+}
+
+void readString(char* buf) {
+    int index = 0, ch;
+    char tostr[2]; //untuk mengubah karakter ke string (dengan \0)
+
+    while (1) {
+      // ambil input dengan interrupt 0x16 dan ambil 8 bit bawah
+        ch = interrupt(0x16, 0x0000, 0, 0, 0) & 0xFF;
+        if (ch == 0x0D) { // jika enter ditekaan, maka assign buffer index terakhir dengan null terminator
+            buf[index] = 0;
+            break;
+        } else if (ch == 0x08) { // jika backspace ditekan, maka cek
+            if (index > 0) { // jika index lebih dari 0, berarti bisa menghapus
+                index--; // kurangi index buffer
+                printString("\b \b"); // mundur 1 cell, print spasi, lalu mundur lagi 1 cell
+            }
+        } else {
+            buf[index++] = ch; // assign buffer index saat ini dengan ch dari interrupt di atas, lalu increment index
+            tostr[0] = ch; tostr[1] = 0;
+            printString(tostr); // tampilkan karakter ke kernel
+        }
+    }
+}
+
+void clearScreen() {
+  // 0x06 untuk scroll up, 0x184F adalah hex gabungan CH dan CL, CH = 0x18 (hex untuk 24), CL = 0x4F (hex untuk 79) [karena kernel ukurannya 25x80], 0x0007 untuk kolom atas kiri. kode di bawah untuk menghapus layar
+    interrupt(0x10, 0x0006, 0x0000, 0x184F, 0x0007);
+  // 0x02 set cursor position 0x00 ke posisi 0,0
+    interrupt(0x10, 0x0002, 0x0000, 0x0000, 0x0000);
+}
+
+// fungsi grep mengembalikan string jika argumennya ditemukan pada buffernya, jika tidak mengembalikan NULL
+char *grep(char *buf, char *arg) {
+    if (strstr(buf, arg)) return buf;
+    return 0;
+}
+
+void wc(char *str) {
+    int countChar = 0;
+    int countWord = 0;
+    int countLine = 0;
+    char buf[32]; // buffer untuk mengubah nilai integer ke string
+    bool inWord = false; // untuk track apakah sedang ada dalam sebuah kata atau tidak
+    int i = 0; // index
+
+    while (str[i]) { // iterasi karakter pada string
+        countChar++; // selalu tambahkan karakter sampai null
+        if (str[i] == '\n') countLine++; // jika terdapat karakter \n maka hitung sebagai baris baru
+        if (str[i] != ' ' && str[i] != '\n') { // jika bukan karakter spasi dan bukan \n cek, apakah sedang ada di dalam suatu kata
+            if (!inWord) { // jika tidak dalam kata, maka mark sebagai dalam kata, dan increment countWord
+                inWord = true;
+                countWord++;
+            }
+        } else { // jika karakternya adalah spasi, maka sedang tidak dalam kata
+            inWord = false;
+        }
+        i++;
+    }
+
+    if (countChar > 0 && str[i - 1] != '\n') countLine++; // jika karakter lebih dari 1 dan index terakhirnya bukan \n maka juga hitung sebagai baris baru (baris terakhir)
+
+  // ubah integernya ke string, lalu print
+    toString(countLine, buf); printString(buf); printString(" ");
+    toString(countWord, buf); printString(buf); printString(" ");
+    toString(countChar, buf); printString(buf); printString("\n");
+}
+
+void runCommand(char *buf) {
+    int i;
+    char *res;
+    char *commands[MAX_COMMAND]; // array urutan commandnya
+    int cmdCount = parseString(buf, commands); // panggil fungsi yang akan memisahkan command dari buffer, return valuenya adalah jumlah command yang berhasil dipisah
+
+  // buat buffer untuk pipe dan inisialisasi dengan 0 semua (clear)
+    char pipeBuf[MAX_BUFFERS];
+    clear((byte *)pipeBuf, MAX_BUFFERS);
+
+    for (i = 0; i < cmdCount; i++) {
+        enum CommandType type = getCmdType(commands[i]); // jika command sudah dipisah pisah, maka lakukan iterasi, lalu dapatkan tipe command ke-i
+
+        if (type == CMD_ECHO) { // jika commandnya adalah echo, maka
+        // karena echo terdiri dari 4 karakter, dan karakter selanjutnya dalah spasi, maka copy karakter dari index ke 5 sampai null ke pipeBuf
+            strcpy(commands[i] + 5, pipeBuf); // echo[spasi]argumen
+            if (cmdCount == 1) { // jika hanya ada 1 command, maka langsung tampilkan saja ke layar
+                printString(pipeBuf);
+                printString("\n");
+            }
+        } else if (type == CMD_GREP) { // jika commandnya adalah grep, maka
+            if (strlen(commands[i]) <= 5) { // jika commandnya hanya grep[spasi], maka akan kekurangan argumen yang diperlukan, keluarkan pesan error
+                printString("Error: missing argument for grep\n");
+                break;
+            }
+            res = grep(pipeBuf, commands[i] + 5); // grep[spasi]argumen
+            if (!res) { // jika grep tidak menemukan match, maka clear buffer dan output NULL ke layar
+                clear((byte *)pipeBuf, MAX_BUFFERS);
+                printString("NULL\n");
+                break;
+            } else { // jika grep menemukan match, maka copy hasilnya ke pipeBuf
+                strcpy(res, pipeBuf);
+                if (i == cmdCount - 1) { // jika grep merupakan command terakhir, tampilkan hasil grepnya ke layar
+                    printString(pipeBuf);
+                    printString("\n");
+                }
+            }
+        } else if (type == CMD_WC) { // jika command typenya wc, maka panggil fungsi wc
+            wc(pipeBuf);
+        } else { // jika typenya CMD_ERR (tidak ada command yang sesuai), print errornya
+            printString("Error: command '");
+            printString(commands[i]);
+            printString("' not found\n");
+        }
+    }
+}
+
+int parseString(char *str, char *commands[]) {
+    int cmdCounter = 0;
+    int stringIndex = 0;
+    commands[cmdCounter++] = str; // command pertama adalah string itu sendiri (yang nantinya akan di null terminate)
+
+  // iterasi string sampai akhir dan jumlah commandnya tidak melebihi max command
+    while (str[stringIndex] && cmdCounter < MAX_COMMAND) {
+        if (str[stringIndex] == '|') { // jika karakter ke-i adalah pipe
+            str[stringIndex++] = 0; // jadikan indexnya null dan increment stringIndex
+            while (str[stringIndex] == ' ') stringIndex++; // menghiraukan spasi sebelum command selanjutnya
+            commands[cmdCounter++] = &str[stringIndex]; // command selanjutnya adalah alamat dari string ke-i setelah pipe dan spasi
+        } else { // jika bukan karakter pipe, maka increment stringIndex saja
+            stringIndex++;
+        }
+    }
+
+    return cmdCounter; // jumlah command sebagai kembalian fungsi
+}
+
+bool prefix(char *cmd, char *type) { // fungsi utilitas untuk mendapatkan command type, dengan membandingkan n karakter awal dari string command dan type yang dicek
+    while (*type) {
+        if (*cmd++ != *type++) return false;
+    }
+    return true;
+}
+
+// fungsi untuk mengecek satu persatu apa type commandnya
+enum CommandType getCmdType(char *cmd) {    
+    if (prefix(cmd, "echo ")) return CMD_ECHO;
+    if (prefix(cmd, "grep ")) return CMD_GREP;
+    if (strcmp(cmd, "wc") == 0) return CMD_WC;
+    return CMD_ERR;
+}
+
+// fungsi utilitas untuk grep, fungsinya untuk mencari substring
+char *strstr(char *str, char *substring) {
+    char *a;
+    char *b;
+
+    b = substring;
+  
+  // jika tidak ada substring yang dicari kembalikan string itu sendiri
+    if (*b == 0) return (char *) str;
+
+  // iterasi sampai null
+    for (; *str != 0; str++) {
+        if (*str != *b) continue; // jika karakternya tidak sesuai continue
+
+        a = str; // jika sesuai, bandingkan index index selanjutnya
+        while (1) {
+            if (*b == 0) return (char *) str;
+            if (*a++ != *b++) break;
+        }
+        b = substring; // kembalikan b ke alamat awal substring
+    }
+
+    return 0;
+}
+
+// fungsi untuk mengubah integer ke string
+void toString(int integer, char *out) {
+    int i; int j;
+    char buf[32];
+    clear((byte *)out, 32); // clear buffer untuk memastikan stringnya benar sesuai integernya
+    i = 0; j = 0;
+
+    if (integer == 0) {
+        out[0] = '0';
+        out[1] = 0;
+        return;
+    }
+
+    while (integer > 0) {
+        buf[i++] = '0' + mod(integer, 10);
+        integer = div(integer, 10);
+    }
+
+    while (i > 0) {
+        out[j++] = buf[--i];
+    }
+    out[j] = 0;
+}
+```
+
+
+std_lib.c
+```c
+#include "std_lib.h"
+
+int div(int a, int b) {
+    int sign, quotient;
+    if (a == 0 || b == 0) return 0;
+
+  // variable untuk menampung sign hasil apakah positif atau negatif
+    sign = 1;
+  // jika sign a dan b beda, maka sign negatif
+    if ((a < 0 && b >= 0) || (a >= 0 && b < 0)) sign = -1;
+
+    // jika a negatif, maka jadikan positif
+    if (a < 0) a = -a;
+    if (b < 0) b = -b;
+
+    // lakukan pembagian manual dengan while loop
+    quotient = 0;
+    while (a >= b) {
+        a -= b;
+        quotient++;
+    }
+
+    return sign * quotient;
+}
+
+// caranya kurang lebih sama dengan div, hanya saja yang dikembalikan adalah sisa baginya
+int mod(int a, int b) {
+    int sign;
+    if (a == 0 || b == 0) return 0;
+
+    sign = 1;
+    if (a < 0) {
+        sign = -1;
+        a = -a;
+    }
+    if (b < 0) b = -b;
+
+    while (a >= b) {
+        a -= b;
+    }
+
+    return sign * a;
+}
+
+// memcpy lakukan iterasi sebesar size dan untuk setiap index destination diassign dengan source
+void memcpy(byte* src, byte* dst, unsigned int size) {
+    unsigned int i;
+    for (i = 0; i < size; i++) {
+        dst[i] = src[i];
+    }
+}
+
+// selama belum mendapat null, tambahkan len
+unsigned int strlen(char* str) {
+    int len = 0;
+    while (*str != 0) {
+        len++;
+        str++;
+    }
+    return len;
+}
+
+bool strcmp(char* str1, char* str2) {
+  // selama str1 dan str2 belum ada yang null, jika karakternya beda, return 1 (beda)
+    while (*str1 && *str2) {
+        if (*str1 != *str2) return 1;
+        str1++;
+        str2++;
+    }
+    if (*str1 || *str2) return 1; // jika salah satunya tidak null (length beda) return 1 (beda)
+    return 0; // jika semuanya sama, maka return 0 (sama)
+}
+
+// iterasi source sampai akhir, dan assign dst dengan src
+void strcpy(char* src, char* dst) {
+    while (*src != 0) {
+        *dst = *src;
+        dst++;
+        src++;
+    }
+    *dst = 0;
+}
+
+// semua index buffer sebesar size assign dengan 0
+void clear(byte* buf, unsigned int size) {
+    unsigned int i;
+    for (i = 0; i < size; i++) {
+        buf[i] = 0;
+    }
+}
+```
+
+```makefile
+SRC=src # nama folder source
+BIN=bin # nama folder bin
+INCLUDE=include # nama folder include 
+
+# untuk melakukan build, jalankan prepare, bootloader, stdlib, kernel, dan link
+build: prepare bootloader stdlib kernel link
+
+# menyiapkan file image
+prepare:
+	dd if=/dev/zero of=$(BIN)/floppy.img bs=512 count=2880
+
+# compile bootloader
+bootloader:
+	nasm -f bin $(SRC)/bootloader.asm -o $(BIN)/bootloader.bin
+	dd if=$(BIN)/bootloader.bin of=$(BIN)/floppy.img bs=512 count=1 conv=notrunc
+
+# compile library
+stdlib:
+	bcc -ansi -c $(SRC)/std_lib.c -I$(INCLUDE) -o $(BIN)/std_lib.o
+
+# compile kernel c dan kernel asm
+kernel:
+	nasm -f as86 $(SRC)/kernel.asm -o $(BIN)/kernel-asm.o
+	bcc -ansi -c $(SRC)/kernel.c -I$(INCLUDE) -o $(BIN)/kernel.o
+	ld86 -o $(BIN)/kernel.bin -d $(BIN)/kernel.o $(BIN)/kernel-asm.o $(BIN)/std_lib.o
+	dd if=$(BIN)/kernel.bin of=$(BIN)/floppy.img bs=512 seek=1 count=5 conv=notrunc
+
+link:
+	@echo "Linking done via kernel target"
+
+# untuk run jalankan command bochsnya
+run:
+	bochs -f bochsrc.txt
+
+# hapus isi bin saat clean
+clean:
+	rm -f $(BIN)/floppy.img \
+	      $(BIN)/bootloader.bin \
+	      $(BIN)/kernel.bin \
+	      $(BIN)/kernel-asm.o \
+	      $(BIN)/kernel.o \
+	      $(BIN)/std_lib.o
+```
+
+- **Screenshots:**
+
+<br>
+
+<div align="center">
+    <img src="./img/task-4.png" width="500"/>
+</div>
+
+<br>
+
+- **Kendala:**
+
+<br>
+
+1) file std_type yang diberi masih ada error, yaitu harus tampai ifndef __cplusplus
+2) membuat bootloader.asmnya (tidak menemukan source belajarnya)
+3) untuk testnya agak susah, jadi saya buat versi stdio dahulu
