@@ -21,9 +21,6 @@
 
 ### Laporan Resmi Praktikum Modul 4 _(Module 4 Lab Work Report)_
 
-Tulis laporan resmi di sini!
-
-_Write your lab work report here!_
 ### task-1 FUSecure
 **Answer:**
 
@@ -699,6 +696,173 @@ terdapat fungsi tambahan yang akan digunakan untuk mengimplementasikan fitur-fit
 
   
   Dengan demikian, kita telah berhasil menyelesaikan task ini dengan mengimplementasikan berbagai fitur keamanan dan akses kontrol pada sistem file menggunakan FUSE.
+
+# Laporan Praktikum Sistem Operasi - Modul 4
+
+## Topik: Filesystem FUSE - "Drama Troll"
+
+### Nama: Johanes Adrian Putra Pratama
+
+### NIM: \[isi NIM Anda]
+
+### Kelas: \[isi Kelas Praktikum Anda]
+
+---
+
+## A. Pembuatan User
+
+Pada tahap awal, kami diminta untuk membuat tiga akun user lokal yaitu:
+
+* DainTontas
+* SunnyBolt
+* Ryeku
+
+### Kode:
+
+```bash
+sudo useradd DainTontas
+sudo passwd DainTontas
+
+sudo useradd SunnyBolt
+sudo passwd SunnyBolt
+
+sudo useradd Ryeku
+sudo passwd Ryeku
+```
+
+### Penjelasan:
+
+Perintah `useradd` digunakan untuk membuat user baru di sistem. `passwd` digunakan untuk menetapkan password awal bagi masing-masing user.
+
+### Output:
+
+Setiap perintah berhasil jika tidak ada pesan error. Setelah memasukkan password, user akan dibuat dan siap digunakan.
+
+---
+
+## B. Pembuatan Filesystem FUSE
+
+Filesystem akan dimount di `/mnt/troll` dan menampilkan dua file:
+
+* `very_spicy_info.txt`
+* `upload.txt`
+
+### Kode:
+
+```bash
+sudo mkdir -p /mnt/troll
+sudo chmod o+rx /mnt
+sudo chmod o+rx /mnt/troll
+```
+
+```bash
+gcc trollfs.c -o trollfs `pkg-config fuse --cflags --libs`
+```
+
+```bash
+./trollfs /mnt/troll -f
+```
+
+### Penjelasan:
+
+* Direktori `/mnt/troll` dibuat sebagai mount point.
+* `chmod o+rx` digunakan untuk memberi akses user non-root.
+* Program `trollfs` dikompilasi dan dijalankan untuk mengaktifkan filesystem kustom berbasis FUSE.
+
+### Output:
+
+Jika berhasil, filesystem akan aktif di `/mnt/troll` dan dapat diakses oleh semua user.
+
+---
+
+## C. Jebakan Berdasarkan User
+
+`very_spicy_info.txt` akan menampilkan isi berbeda:
+
+* Jika DainTontas membuka: `Very spicy internal developer information: leaked roadmap.docx`
+* User lain: `DainTontas' personal secret!!.txt`
+
+### Potongan Kode:
+
+```c
+if (strcmp(nama_file, "very_spicy_info.txt") == 0) {
+    const char *isi = is_daintontas()
+        ? "Very spicy internal developer information: leaked roadmap.docx\n"
+        : "DainTontas' personal secret!!.txt\n";
+    memcpy(buf, isi + offset, size);
+    return size;
+}
+```
+
+### Penjelasan:
+
+Kode ini berada di fungsi `read()` untuk file `very_spicy_info.txt`, dan menyesuaikan isi output berdasarkan user yang mengakses.
+
+### Output:
+
+```bash
+cat /mnt/troll/very_spicy_info.txt
+```
+
+Hasilnya bergantung pada siapa user yang menjalankan `cat`.
+
+---
+
+## D. Trap Upload.txt
+
+Ketika user DainTontas melakukan:
+
+```bash
+echo upload > /mnt/troll/upload.txt
+```
+
+Sistem akan mengaktifkan jebakan berupa **ASCII Art** ketika membuka semua file `.txt`.
+
+### Potongan Kode:
+
+```c
+if (strcmp(nama_file, "upload.txt") == 0 && is_daintontas()) {
+    if (strncmp(buf, "upload", 6) == 0) {
+        activate_trap();
+    }
+    return size;
+}
+```
+
+```c
+void activate_trap() {
+    FILE *f = fopen("/var/tmp/troll_triggered.flag", "w");
+    if (f) {
+        fputs("TRAP ACTIVE", f);
+        fclose(f);
+    }
+}
+```
+
+### Penjelasan:
+
+Ketika DainTontas melakukan upload, maka file flag ditulis ke `/var/tmp/`, sebagai tanda bahwa jebakan telah aktif. Semua `.txt` akan memunculkan ASCII Art setelahnya.
+
+### Output:
+
+```bash
+cat /mnt/troll/upload.txt
+```
+
+Setelah trap aktif:
+
+```bash
+cat /mnt/troll/very_spicy_info.txt
+```
+
+Akan menampilkan:
+
+```
+Fell for it again reward
+```
+
+---
+
 
 ### Task-4 LilhabOS
 **Answer:**
