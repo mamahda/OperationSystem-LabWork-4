@@ -51,8 +51,15 @@ static int troll_open(const char *path, struct fuse_file_info *fi)
     if (strcmp(path, file1) != 0 && strcmp(path, file2) != 0)
         return -ENOENT;
 
+    // Perbolehkan semua mode buka file
+    if ((fi->flags & O_ACCMODE) != O_RDONLY &&
+        (fi->flags & O_ACCMODE) != O_WRONLY &&
+        (fi->flags & O_ACCMODE) != O_RDWR)
+        return -EACCES;
+
     return 0;
 }
+
 
 static int troll_read(const char *path, char *buf, size_t size, off_t offset,
                       struct fuse_file_info *fi)
