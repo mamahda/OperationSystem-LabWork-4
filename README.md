@@ -697,17 +697,7 @@ terdapat fungsi tambahan yang akan digunakan untuk mengimplementasikan fitur-fit
   
   Dengan demikian, kita telah berhasil menyelesaikan task ini dengan mengimplementasikan berbagai fitur keamanan dan akses kontrol pada sistem file menggunakan FUSE.
 
-# Laporan Praktikum Sistem Operasi - Modul 4
-
-## Topik: Filesystem FUSE - "Drama Troll"
-
-### Nama: Johanes Adrian Putra Pratama
-
-### NIM: \[isi NIM Anda]
-
-### Kelas: \[isi Kelas Praktikum Anda]
-
----
+# Task 3 - Troll DainTontos Trap
 
 ## A. Pembuatan User
 
