@@ -29,7 +29,6 @@ static int troll_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                          off_t offset, struct fuse_file_info *fi) {
     if (strcmp(path, "/") != 0)
         return -ENOENT;
-
     filler(buf, ".", NULL, 0);
     filler(buf, "..", NULL, 0);
     filler(buf, file1 + 1, NULL, 0);
@@ -76,7 +75,7 @@ static int troll_access(const char *path, int mask) {
     if (strcmp(path, "/") == 0 ||
         strcmp(path, file1) == 0 ||
         strcmp(path, file2) == 0) {
-        return 0; // allow access
+        return 0;
     }
     return -ENOENT;
 }
