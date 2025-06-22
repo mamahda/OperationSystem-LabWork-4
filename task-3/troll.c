@@ -10,8 +10,7 @@
 static const char *file1 = "/very_spicy_info.txt";
 static const char *file2 = "/upload.txt";
 
-static int troll_getattr(const char *path, struct stat *stbuf)
-{
+static int troll_getattr(const char *path, struct stat *stbuf) {
     memset(stbuf, 0, sizeof(struct stat));
     if (strcmp(path, "/") == 0) {
         stbuf->st_mode = S_IFDIR | 0755;
@@ -19,7 +18,7 @@ static int troll_getattr(const char *path, struct stat *stbuf)
     } else if (strcmp(path, file1) == 0 || strcmp(path, file2) == 0) {
         stbuf->st_mode = S_IFREG | 0644;
         stbuf->st_nlink = 1;
-        stbuf->st_size = 512;
+        stbuf->st_size = 128;
     } else {
         return -ENOENT;
     }
@@ -27,8 +26,7 @@ static int troll_getattr(const char *path, struct stat *stbuf)
 }
 
 static int troll_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
-                         off_t offset, struct fuse_file_info *fi)
-{
+                         off_t offset, struct fuse_file_info *fi) {
     if (strcmp(path, "/") != 0)
         return -ENOENT;
 
@@ -39,8 +37,7 @@ static int troll_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
     return 0;
 }
 
-static int troll_open(const char *path, struct fuse_file_info *fi)
-{
+static int troll_open(const char *path, struct fuse_file_info *fi) {
     struct fuse_context *context = fuse_get_context();
     const char *username = getpwuid(context->uid)->pw_name;
 
@@ -51,24 +48,16 @@ static int troll_open(const char *path, struct fuse_file_info *fi)
     if (strcmp(path, file1) != 0 && strcmp(path, file2) != 0)
         return -ENOENT;
 
-    // Perbolehkan semua mode buka file
-    if ((fi->flags & O_ACCMODE) != O_RDONLY &&
-        (fi->flags & O_ACCMODE) != O_WRONLY &&
-        (fi->flags & O_ACCMODE) != O_RDWR)
-        return -EACCES;
-
     return 0;
 }
 
-
 static int troll_read(const char *path, char *buf, size_t size, off_t offset,
-                      struct fuse_file_info *fi)
-{
+                      struct fuse_file_info *fi) {
     const char *data;
     if (strcmp(path, file1) == 0)
-        data = "🔥 This is top secret spicy info!\n";
+        data = "🔥 Secret spicy content!\n";
     else if (strcmp(path, file2) == 0)
-        data = "📥 Ready to upload? Watch out...\n";
+        data = "📥 Upload detected. Trap triggered?\n";
     else
         return -ENOENT;
 
@@ -77,9 +66,19 @@ static int troll_read(const char *path, char *buf, size_t size, off_t offset,
         if (offset + size > len)
             size = len - offset;
         memcpy(buf, data + offset, size);
-    } else size = 0;
+    } else
+        size = 0;
 
     return size;
+}
+
+static int troll_access(const char *path, int mask) {
+    if (strcmp(path, "/") == 0 ||
+        strcmp(path, file1) == 0 ||
+        strcmp(path, file2) == 0) {
+        return 0; // allow access
+    }
+    return -ENOENT;
 }
 
 static struct fuse_operations troll_oper = {
@@ -87,9 +86,9 @@ static struct fuse_operations troll_oper = {
     .readdir = troll_readdir,
     .open    = troll_open,
     .read    = troll_read,
+    .access  = troll_access,
 };
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
     return fuse_main(argc, argv, &troll_oper, NULL);
 }
